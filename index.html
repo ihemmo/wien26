@@ -204,7 +204,7 @@ main{position:relative;z-index:1;padding:1.5rem 1rem 5rem;max-width:860px;margin
       <div class="trans-body">
         <div class="trans-panel">
           <div class="panel-label">🇫🇮 Suomeksi</div>
-          <textarea class="trans-ta" id="trans-input" placeholder="Kirjoita suomeksi mitä haluat sanoa..." rows="4"></textarea>
+          <textarea class="trans-ta" id="trans-input" placeholder="Kirjoita suomeksi, esim. 'Anteeksi', 'Paljonko maksaa?', 'Pöytä kahdelle'..." rows="4"></textarea>
         </div>
         <div class="trans-panel">
           <div class="panel-label">🇩🇪 Saksaksi</div>
@@ -214,7 +214,7 @@ main{position:relative;z-index:1;padding:1.5rem 1rem 5rem;max-width:860px;margin
       <div class="trans-foot">
         <button class="btn gold" onclick="doTranslate()">✦ Käännä</button>
         <button class="btn" id="speak-trans-btn" onclick="speakTranslation()" style="display:none">🔊 Kuuntele</button>
-        <span class="trans-status" id="trans-status">Ctrl+Enter käynnistää käännöksen</span>
+        <span class="trans-status" id="trans-status">Toimii myös offline! · Ctrl+Enter käynnistää</span>
       </div>
     </div>
   </div>
@@ -684,9 +684,187 @@ function speakTranslation() {
 }
 
 // ═══════════════════════════════════════
-//  TRANSLATION via MyMemory API
-//  Toimii suoraan selaimesta ilman API-avainta
+//  TRANSLATION — Offline sanakirja + API-fallback
+//  Toimii kaikkialla: artifact-preview, offline, matkalla
 // ═══════════════════════════════════════
+
+// Kattava suomi→saksa sanakirja matkakäyttöön
+const DICT = {
+  // Tervehdykset
+  'hei':'Grüß Gott','moi':'Servus','moikka':'Servus','terve':'Grüß Gott',
+  'hei hei':'Baba','moi moi':'Baba','moikka moikka':'Baba',
+  'näkemiin':'Auf Wiedersehen','hyvästi':'Auf Wiedersehen',
+  'huomenta':'Guten Morgen','hyvää huomenta':'Guten Morgen',
+  'iltaa':'Guten Abend','hyvää iltaa':'Guten Abend',
+  'hyvää yötä':'Gute Nacht','yötä':'Gute Nacht',
+  'kiitos':'Danke schön','kiitos paljon':'Vielen Dank',
+  'ole hyvä':'Bitte','ei kestä':'Bitte','eipä kestä':'Bitte',
+  'anteeksi':'Entschuldigung','sori':'Entschuldigung',
+  'kyllä':'Ja','ei':'Nein','ehkä':'Vielleicht',
+  'okei':'Okay','hyvä':'Gut','huono':'Schlecht',
+  'kiva':'Schön','mahtava':'Großartig','hienoa':'Wunderbar',
+
+  // Kohteliaisuudet
+  'puhuuko englantia':'Sprechen Sie Englisch?',
+  'puhutko englantia':'Sprichst du Englisch?',
+  'en ymmärrä':'Ich verstehe nicht',
+  'en puhu saksaa':'Ich spreche kein Deutsch',
+  'puhun vähän saksaa':'Ich spreche ein bisschen Deutsch',
+  'voitko auttaa':'Können Sie mir helfen?',
+  'voitko toistaa':'Können Sie das wiederholen?',
+
+  // Ravintola
+  'pöytä kahdelle':'Einen Tisch für zwei, bitte',
+  'ruokalista':'Die Speisekarte, bitte',
+  'voiko saada ruokalistan':'Die Speisekarte, bitte',
+  'haluaisin':'Ich hätte gern...',
+  'olut':'Ein Krügerl, bitte','iso olut':'Ein Krügerl, bitte',
+  'pieni olut':'Ein Pfiff, bitte',
+  'viini':'Wein','punaviini':'Rotwein','valkoviini':'Weißwein',
+  'vesi':'Wasser','hanavesi':'Leitungswasser',
+  'kahvi':'Kaffee','tee':'Tee','mehu':'Saft',
+  'lasku':'Zahlen bitte','lasku kiitos':'Zahlen bitte',
+  'hyvää ruokahalua':'Mahlzeit!',
+  'maistui hyvältä':'Hat sehr gut geschmeckt!',
+  'maistui mainiosti':'Hat sehr gut geschmeckt!',
+  'wieniläinen leike':'Wiener Schnitzel','schnitzel':'Wiener Schnitzel',
+  'gulassi':'Gulasch','omenapaistos':'Apfelstrudel',
+  'kaiserschmarrn':'Kaiserschmarrn','keisarin räiskinät':'Kaiserschmarrn',
+  'leipä':'Brot','sämpylä':'Semmel','juusto':'Käse',
+  'liha':'Fleisch','kala':'Fisch','kana':'Huhn',
+  'salaatti':'Salat','keitto':'Suppe','jälkiruoka':'Nachspeise',
+  'aamiainen':'Frühstück','lounas':'Mittagessen','illallinen':'Abendessen',
+  'kasvisruoka':'vegetarisches Essen',
+  'allerginen':'Ich bin allergisch gegen...',
+  'gluteeniton':'glutenfrei','laktoositon':'laktosefrei',
+
+  // Liikenne
+  'metro':'U-Bahn','raitiovaunu':'Straßenbahn','bussi':'Bus',
+  'juna':'Zug','taksi':'Taxi','lentokenttä':'Flughafen',
+  'rautatieasema':'Bahnhof','asema':'Station',
+  'lippu':'Fahrkarte','päivälippu':'Tageskarte',
+  'missä on':'Wo ist...?','missä':'Wo?',
+  'vasemmalle':'Links','oikealle':'Rechts','suoraan':'Geradeaus',
+  'kuinka kauan':'Wie lange dauert es?',
+  'kuinka pitkä matka':'Wie weit ist es?',
+  'pysäkki':'Haltestelle',
+
+  // Kauppa & raha
+  'paljonko maksaa':'Was kostet das?','paljonko':'Was kostet das?',
+  'hinta':'Preis','liian kallis':'Zu teuer',
+  'otan tämän':'Ich nehme das','haluan ostaa':'Ich möchte kaufen',
+  'käteinen':'Bar bezahlen','korttimaksu':'Mit Karte bezahlen',
+  'kassi':'Eine Tasche, bitte','kuitti':'Quittung, bitte',
+
+  // Vuoristo / Rax
+  'köysirata':'Seilbahn','vaellusreitti':'Wanderweg',
+  'vuoristomaja':'Berghütte','huippu':'Gipfel',
+  'varovasti':'Vorsicht!','apua':'Hilfe!',
+  'onko reitti auki':'Ist der Weg offen?',
+  'olen väsynyt':'Ich bin erschöpft',
+  'sää':'Wetter','sataa':'Es regnet','aurinko':'Sonne',
+  'kylmä':'kalt','kuuma':'heiß','tuulista':'windig',
+
+  // Majoitus
+  'hotelli':'Hotel','huone':'Zimmer',
+  'avain':'Schlüssel','hissi':'Aufzug / Lift',
+  'wifi':'WLAN','salasana':'Passwort',
+  'check in':'Einchecken','check out':'Auschecken',
+
+  // Numerot
+  'yksi':'Eins','kaksi':'Zwei','kolme':'Drei','neljä':'Vier',
+  'viisi':'Fünf','kuusi':'Sechs','seitsemän':'Sieben',
+  'kahdeksan':'Acht','yhdeksän':'Neun','kymmenen':'Zehn',
+
+  // Hätätilanne
+  'hätänumero':'Notruf','ambulanssi':'Krankenwagen (144)',
+  'poliisi':'Polizei (133)','sairaala':'Krankenhaus',
+  'apteekki':'Apotheke','missä on apteekki':'Wo ist die nächste Apotheke?',
+  'en voi hyvin':'Mir geht es nicht gut',
+  'tarvitsen lääkärin':'Ich brauche einen Arzt',
+
+  // Yleisiä lauseita
+  'mitä tämä on':'Was ist das?','mikä tämä on':'Was ist das?',
+  'puhun suomea':'Ich spreche Finnisch',
+  'olen suomesta':'Ich komme aus Finnland',
+  'olen turisti':'Ich bin Tourist',
+  'minun nimeni on':'Mein Name ist...',
+  'hauska tavata':'Freut mich',
+  'minne':'Wohin?','milloin':'Wann?','miksi':'Warum?',
+  'kuinka':'Wie?','kuka':'Wer?','mitä':'Was?',
+  'tänään':'Heute','huomenna':'Morgen','eilen':'Gestern',
+  'nyt':'Jetzt','myöhemmin':'Später','pian':'Bald',
+  'aamu':'Morgen','päivä':'Tag','ilta':'Abend','yö':'Nacht',
+  'kaunis':'Schön','iso':'Groß','pieni':'Klein',
+  'lähellä':'In der Nähe','kaukana':'Weit weg',
+  'auki':'Offen / Geöffnet','kiinni':'Geschlossen',
+  'wc':'WC / Toilette','vessa':'WC / Toilette',
+};
+
+function dictTranslate(input) {
+  var key = input.toLowerCase().replace(/[?.!,;:]+$/g,'').trim();
+  // Täsmäosuma
+  if (DICT[key]) return DICT[key];
+  // Ilman kysymysmerkkiä
+  key = key.replace(/\?$/,'').trim();
+  if (DICT[key]) return DICT[key];
+  // Etsi pisin osuma alusta
+  var words = key.split(/\s+/);
+  for (var len = words.length; len >= 2; len--) {
+    var sub = words.slice(0, len).join(' ');
+    if (DICT[sub]) return DICT[sub];
+  }
+  // Yksittäissanahaku: käännä jokainen sana erikseen
+  var parts = [];
+  var found = false;
+  for (var i = 0; i < words.length; i++) {
+    if (DICT[words[i]]) {
+      parts.push(DICT[words[i]]);
+      found = true;
+    } else {
+      parts.push(words[i]);
+    }
+  }
+  if (found) return parts.join(' ') + ' (osittainen käännös)';
+  return null;
+}
+
+async function tryApiTranslate(input) {
+  // Kokeillaan Anthropic API (toimii Claude-artifactissa)
+  try {
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:1000,
+        system:'Olet itävaltalainen kieliopas. Käännä annettu suomenkielinen teksti itävaltalaiselle saksalle (Österreichisches Deutsch). Käytä itävaltalaisia sanontoja kun ne sopivat. Vastaa pelkällä käännöksellä.',
+        messages:[{role:'user', content:input}]
+      })
+    });
+    var data = await resp.json();
+    if (data.content && data.content[0] && data.content[0].text) return data.content[0].text;
+  } catch(e) { console.log('Anthropic API ei saatavilla:', e.message); }
+
+  // Fallback: MyMemory API (toimii standalone-selaimessa)
+  try {
+    var url = 'https://api.mymemory.translated.net/get?q='
+      + encodeURIComponent(input) + '&langpair=fi|de';
+    var resp2 = await fetch(url);
+    if (!resp2.ok) throw new Error('HTTP ' + resp2.status);
+    var data2 = await resp2.json();
+    if (data2.responseStatus === 200 && data2.responseData && data2.responseData.translatedText) {
+      var tr = data2.responseData.translatedText;
+      if (tr === tr.toUpperCase() && tr.length > 3) {
+        tr = tr.charAt(0).toUpperCase() + tr.slice(1).toLowerCase();
+      }
+      return tr;
+    }
+  } catch(e) { console.log('MyMemory API ei saatavilla:', e.message); }
+
+  return null;
+}
+
 async function doTranslate() {
   const input = document.getElementById('trans-input').value.trim();
   if (!input) return;
@@ -695,38 +873,45 @@ async function doTranslate() {
   const status = document.getElementById('trans-status');
   const speakBtn = document.getElementById('speak-trans-btn');
 
+  // 1. Kokeile ensin offline-sanakirjaa (välitön tulos)
+  var offline = dictTranslate(input);
+
+  // Jos täsmällinen offline-tulos, näytä se heti
+  if (offline && !offline.includes('osittainen käännös')) {
+    translationText = offline;
+    res.textContent = offline;
+    res.className = 'trans-result';
+    speakBtn.style.display = 'inline-flex';
+    status.textContent = '✓ Sanakirjakäännös (toimii myös offline!)';
+    return;
+  }
+
+  // 2. Kokeile API-käännöstä (tarkempi, mutta vaatii nettiä)
   res.innerHTML = '<span class="spinner"></span>Käännetään...';
   res.className = 'trans-result loading';
   status.textContent = '';
   speakBtn.style.display = 'none';
   translationText = '';
 
-  try {
-    const url = 'https://api.mymemory.translated.net/get?q='
-      + encodeURIComponent(input) + '&langpair=fi|de';
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
+  var apiResult = await tryApiTranslate(input);
 
-    if (data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
-      var tr = data.responseData.translatedText;
-      // MyMemory palauttaa joskus CAPS-tuloksen laadunvarmistuksesta — korjaa
-      if (tr === tr.toUpperCase() && tr.length > 3) {
-        tr = tr.charAt(0).toUpperCase() + tr.slice(1).toLowerCase();
-      }
-      translationText = tr;
-      res.textContent = tr;
-      res.className = 'trans-result';
-      speakBtn.style.display = 'inline-flex';
-      status.textContent = '✓ Käännetty saksaksi (suomi → saksa)';
-    } else {
-      throw new Error(data.responseDetails || 'empty');
-    }
-  } catch(e) {
-    res.innerHTML = '<span style="color:var(--c1)">Käännösvirhe — tarkista internetyhteys</span>';
+  if (apiResult) {
+    translationText = apiResult;
+    res.textContent = apiResult;
+    res.className = 'trans-result';
+    speakBtn.style.display = 'inline-flex';
+    status.textContent = '✓ Käännetty saksaksi';
+  } else if (offline) {
+    // API epäonnistui, käytä osittaista offline-tulosta
+    translationText = offline.replace(' (osittainen käännös)','');
+    res.textContent = offline;
+    res.className = 'trans-result';
+    speakBtn.style.display = 'inline-flex';
+    status.textContent = '⚡ Osittainen sanakirjakäännös — kaikki sanat eivät löytyneet';
+  } else {
+    res.innerHTML = '<span style="color:var(--c1)">Käännöstä ei löytynyt — kokeile yksinkertaisempaa lausetta tai yksittäisiä sanoja</span>';
     res.className = 'trans-result';
     status.textContent = '';
-    console.error('Translation error:', e);
   }
 }
 
