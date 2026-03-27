@@ -199,7 +199,7 @@ main{position:relative;z-index:1;padding:1.5rem 1rem 5rem;max-width:860px;margin
     <div class="trans-box">
       <div class="trans-hdr">
         <span style="font-size:1.3rem">🔤</span>
-        <h3>Vapaa käännös — Suomi → Itävaltalainen saksa</h3>
+        <h3>Vapaa käännös — Suomi → Saksa</h3>
       </div>
       <div class="trans-body">
         <div class="trans-panel">
@@ -207,7 +207,7 @@ main{position:relative;z-index:1;padding:1.5rem 1rem 5rem;max-width:860px;margin
           <textarea class="trans-ta" id="trans-input" placeholder="Kirjoita suomeksi mitä haluat sanoa..." rows="4"></textarea>
         </div>
         <div class="trans-panel">
-          <div class="panel-label">🇦🇹 Itävaltalaiseksi</div>
+          <div class="panel-label">🇩🇪 Saksaksi</div>
           <div class="trans-result idle" id="trans-result">Käännös ilmestyy tähän...</div>
         </div>
       </div>
@@ -593,7 +593,7 @@ function buildPhrases() {
         <div class="phrase-de">${escH(p.de)}</div>
         ${p.tip?`<div class="phrase-tip">💡 ${escH(p.tip)}</div>`:''}
       </div>
-      <button class="speak-btn" onclick="speak(${JSON.stringify(p.de)},this)" title="Kuuntele">🔊</button>
+      <button class="speak-btn" data-speak="${escH(p.de)}" title="Kuuntele">🔊</button>
     </div>`).join('');
 }
 
@@ -605,16 +605,19 @@ function setCat(id) {
 
 // ═══════════════════════════════════════
 //  SPEECH SYNTHESIS
-//  Pre-load German voice at startup
-//  (same pattern as PT app by Opus).
-//  speak() must be fully synchronous —
-//  Safari blocks deferred calls.
+//  iOS Safari -yhteensopiva rakenne:
+//  1. Äänen lataus pollauksella (onvoiceschanged ei toimi iOS:ssä)
+//  2. speak() synkronisesti click-handlerissa (ei setTimeout:ia)
+//  3. Event delegation data-speak -attribuutilla (ei rikkinäistä inline-onclickia)
 // ═══════════════════════════════════════
 var deVoice = null;
+var voicesReady = false;
 
-function findDeVoice() {
+function loadDeVoice() {
   try {
     var voices = speechSynthesis.getVoices();
+    if (voices.length === 0) return;
+    voicesReady = true;
     deVoice = voices.find(function(v){ return v.lang === 'de-AT'; })
            || voices.find(function(v){ return v.lang === 'de-DE'; })
            || voices.find(function(v){ return v.lang && v.lang.startsWith('de'); })
@@ -622,34 +625,67 @@ function findDeVoice() {
   } catch(e) {}
 }
 
-// Load voice at startup — store reference for synchronous use later
-try { speechSynthesis.onvoiceschanged = findDeVoice; findDeVoice(); } catch(e) {}
+// Lataa äänet: kokeile useaa tapaa (Safari-yhteensopivuus)
+if (typeof speechSynthesis !== 'undefined') {
+  loadDeVoice();
+  if (speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = loadDeVoice;
+  }
+  // iOS-fallback: pollaa kunnes äänet latautuvat
+  var voicePollCount = 0;
+  var voicePoll = setInterval(function() {
+    loadDeVoice();
+    voicePollCount++;
+    if (voicesReady || voicePollCount > 30) clearInterval(voicePoll);
+  }, 150);
+}
 
 function speak(text, btn) {
+  if (!text) return;
   if (!('speechSynthesis' in window)) { toast('❌ Selain ei tue puhesynteeseä'); return; }
-  try {
-    speechSynthesis.cancel();
-    var u = new SpeechSynthesisUtterance(text);
-    u.lang = 'de-AT';
-    u.rate = 0.88;
-    u.pitch = 1.0;
-    u.volume = 1.0;
-    if (deVoice) u.voice = deVoice;
-    if (btn) btn.classList.add('speaking');
-    u.onend   = function() { if (btn) btn.classList.remove('speaking'); };
-    u.onerror = function() { if (btn) btn.classList.remove('speaking'); };
-    speechSynthesis.speak(u);
-  } catch(e) {
-    if (btn) btn.classList.remove('speaking');
+
+  // Lataa äänet tarvittaessa
+  if (!voicesReady) loadDeVoice();
+
+  // iOS Safari: cancel() + välitön speak() samassa kutsussa
+  try { speechSynthesis.cancel(); } catch(e) {}
+
+  var u = new SpeechSynthesisUtterance(text);
+  u.lang = 'de-DE';
+  u.rate = 0.88;
+  u.pitch = 1.0;
+  u.volume = 1.0;
+  if (deVoice) u.voice = deVoice;
+
+  if (btn) btn.classList.add('speaking');
+  u.onend   = function() { if (btn) btn.classList.remove('speaking'); };
+  u.onerror = function() { if (btn) btn.classList.remove('speaking'); };
+
+  speechSynthesis.speak(u);
+
+  // iOS Safari: varmista ettei jää pause-tilaan
+  if (speechSynthesis.paused) {
+    try { speechSynthesis.resume(); } catch(e) {}
   }
 }
 
+// Event delegation: kuuntele kaikkia .speak-btn klikkejä
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('.speak-btn[data-speak]');
+  if (btn) {
+    e.preventDefault();
+    speak(btn.getAttribute('data-speak'), btn);
+  }
+});
+
 function speakTranslation() {
-  if (translationText) speak(translationText, document.getElementById('speak-trans-btn'));
+  var btn = document.getElementById('speak-trans-btn');
+  if (translationText) speak(translationText, btn);
 }
 
 // ═══════════════════════════════════════
-//  TRANSLATION via Anthropic API
+//  TRANSLATION via MyMemory API
+//  Toimii suoraan selaimesta ilman API-avainta
 // ═══════════════════════════════════════
 async function doTranslate() {
   const input = document.getElementById('trans-input').value.trim();
@@ -666,31 +702,31 @@ async function doTranslate() {
   translationText = '';
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:1000,
-        system:'Olet itävaltalainen kieliopas. Käyttäjä antaa suomenkielistä tekstiä, jonka käännät itävaltalaiselle saksalle (Österreichisches Deutsch). Käytä itävaltalaisia sanontoja ja slangisanoja kun ne sopivat (esim. Grüß Gott, Servus, Baba, Bim, Krügerl, Mahlzeit, Oida jne.). Vastauksena pelkästään käännetty teksti, ei selityksiä.',
-        messages:[{role:'user', content:input}]
-      })
-    });
+    const url = 'https://api.mymemory.translated.net/get?q='
+      + encodeURIComponent(input) + '&langpair=fi|de';
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
-    const tr = data.content && data.content[0] && data.content[0].text;
-    if (tr) {
+
+    if (data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
+      var tr = data.responseData.translatedText;
+      // MyMemory palauttaa joskus CAPS-tuloksen laadunvarmistuksesta — korjaa
+      if (tr === tr.toUpperCase() && tr.length > 3) {
+        tr = tr.charAt(0).toUpperCase() + tr.slice(1).toLowerCase();
+      }
       translationText = tr;
       res.textContent = tr;
       res.className = 'trans-result';
       speakBtn.style.display = 'inline-flex';
-      status.textContent = '✓ Käännetty itävaltalaiselle saksalle';
+      status.textContent = '✓ Käännetty saksaksi (suomi → saksa)';
     } else {
-      throw new Error('empty');
+      throw new Error(data.responseDetails || 'empty');
     }
   } catch(e) {
     res.innerHTML = '<span style="color:var(--c1)">Käännösvirhe — tarkista internetyhteys</span>';
     res.className = 'trans-result';
     status.textContent = '';
+    console.error('Translation error:', e);
   }
 }
 
